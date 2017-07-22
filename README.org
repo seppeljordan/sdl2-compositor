@@ -1,0 +1,178 @@
+* Introduction
+  This package provides tools for simple image composition through the
+  means of the SDL library, version 2.  You can combine, translate,
+  rotate, blend, modulate colors and draw in a declarative way.
+
+* Example
+
+  The following program draws rectangles to the screen, pauses for 5
+  seconds and terminates afterwards.  See the comments for further
+  explanation.
+
+  #+begin_src haskell :tangle example.hs
+    import Control.Concurrent (threadDelay)
+    import Data.Text (pack)
+    import Linear.V2 (V2(..))
+    import SDL (initialize, InitFlag(InitVideo), createWindow, defaultWindow,
+                createRenderer, RendererConfig(rendererTargetTexture),
+                defaultRenderer, rendererLogicalSize, ($=), present, clear, quit,
+                BlendMode(BlendAlphaBlend), Texture)
+    import SDL.Compositor (filledRectangleC, translateA, runRenderer, overC,
+                           modulateAlphaM, blendMode, rgba, CompositingNode)
+
+    main :: IO ()
+    main = do
+      -- intialize SDL
+      initialize [InitVideo]
+      -- create a window
+      window <- createWindow (pack "test window") defaultWindow
+      -- create a renderer for the window
+      rend <- createRenderer window (-1) (defaultRenderer {rendererTargetTexture = True})
+      -- set the logical size of the window to 800x600
+      rendererLogicalSize rend $= Just (V2 800 600)
+      -- clear the renderer
+      clear rend
+      let
+        -- 3 rectangles, one in red, one in green and one in blue, width:
+        -- 100, height 150
+        rectRed, rectGreen, rectBlue :: CompositingNode Texture
+        rectRed = filledRectangleC (V2 100 150) (rgba 255 100 100 255)
+        rectGreen = filledRectangleC (V2 100 150) (rgba 100 255 100 255)
+        rectBlue = filledRectangleC (V2 100 150) (rgba 100 100 255 255)
+        -- translate an image by (250,300) pixels
+        translateToCenter = translateA (V2 250 300)
+      -- draw everything
+      runRenderer rend
+        ( ( -- enable alpha blending for the whole subtree
+            blendMode BlendAlphaBlend .
+            -- make all the images slightly transparent
+            modulateAlphaM 150 .
+            -- align the images in the center
+            translateToCenter
+          )
+          ( -- red, green and blue
+            rectRed `overC`
+            translateA (V2 150 0) (rectGreen `overC`
+                                   translateA (V2 150 0) rectBlue)
+          )
+        )
+      -- show the drawn image on the screen
+      present rend
+      -- pause for 5 seconds
+      threadDelay (5 * (10::Int)^(6::Int))
+      -- quit SDL
+      quit
+  #+end_src
+
+* Usage
+  You compose images from two kinds of primitives: textures and
+  shapes.  Generate a texture through the usual means of SDL.  Use
+  =sizedC= generate a compositional element of the
+  texture.  You can also create shapes by using =rectangleC=,
+  =filledRectangleC= and =lineC=.
+
+  You can combine images with the =overC= function.  It takes two
+  arguments and puts the first one above the second one when
+  rendering.  When you have a list of images that you want to combine
+  you can use for example =foldl1 overC= to combine all of them.  You
+  should also check out the =withZIndex= function that allows you to
+  specify the z-ordering explicitly and independent of the order of
+  function arguments.
+
+  Color modulation can be archived via the following commands:
+
+  | =modulateAlphaM= | for alpha channel |
+  | =modulateRedM=   | for red channel   |
+  | =modulateGreenM= | for green channel |
+  | =modulateBlueM=  | for blue channel  |
+
+  For further documentation and the API see hackage.
+
+* Resolution Independent Drawing
+  This package provides an implementation for resoltution independent
+  image composition.  When using the resolution independent
+  implementation another coordinate system is used.  When you have a
+  quadratic window then the point (0,0) is the top left corner and
+  (1,1) is the bottom right corner.  In case the screen is not
+  quadratic, then the algorithm will find the biggest square that fits
+  on the screen, put it in the center and assignes the coordinates
+  according to above rule.  The coordinate system is extended linearly
+  beyond the boundaries of the square.  Execute the example program
+  given below familiarize with this concept.  You should be able to
+  execute it with =runhaskell=, it is really small.
+
+  Here are some example calls:
+  #+begin_example
+    runhaskell resultion-independent.hs 800 600
+    runhaskell resultion-independent.hs 40 30
+    runhaskell resultion-independent.hs 20 600
+  #+end_example
+
+  This is the source code for the above mentioned example:
+  #+begin_src haskell :tangle resolution-independent.hs
+    import Data.Text (pack)
+    import Linear.V2 (V2(..))
+    import SDL (initialize, InitFlag(InitVideo), createWindow,
+                WindowConfig(windowInitialSize), defaultWindow,
+                createRenderer, defaultRenderer, clear, present,
+                RendererConfig(rendererTargetTexture,rendererType),
+                quit,($=), rendererLogicalSize, Texture,
+                RendererType(SoftwareRenderer)
+               )
+    import System.Environment (getArgs)
+    import SDL.Compositor.ResIndependent (translateR, filledRectangleR,
+                                          fromRelativeCompositor, ResIndependent)
+    import SDL.Compositor (runRenderer, rgba, CompositingNode)
+    import Control.Concurrent (threadDelay)
+
+    main :: IO ()
+    main = do
+      -- Initialize sdl
+      initialize [InitVideo]
+      -- read window dimensions from command line args
+      dims <- (\(w:h:_) -> V2 (read w) (read h)) <$> getArgs
+      -- create a window with the given dimensions
+      window <- createWindow (pack "test window") (defaultWindow {windowInitialSize = dims})
+      -- create a renderer for the windows surface, software for
+      -- compatibility reasons
+      renderer <- createRenderer window (-1)
+                  (defaultRenderer {rendererTargetTexture = True
+                                   ,rendererType = SoftwareRenderer})
+      -- setting the logical size is optional
+      rendererLogicalSize renderer $= Just dims
+      -- clear the window
+      clear renderer
+      -- draw a white square with length 0.99 for the edges
+      let square :: ResIndependent CompositingNode Texture
+          square = filledRectangleR (V2 0.99 0.99) (rgba 255 255 255 255)
+      -- draw everything
+      runRenderer
+        renderer
+        ( fromRelativeCompositor (fromIntegral <$> dims) $
+          translateR (V2 0.5 0.5) -- move the square to the center of
+          square
+        )
+      -- present what we have drawn to the user
+      present renderer
+      -- wait for 5 seconds
+      threadDelay (5 * 10^(6::Int))
+      -- quit sdl
+      quit
+  #+end_src
+
+* License
+  Copyright (C) 2015  Sebastian Jordan
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful, but
+  WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+  General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see
+  <http://www.gnu.org/licenses/>.
