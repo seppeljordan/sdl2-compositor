@@ -114,12 +114,14 @@ instance Drawer (CompositingNode a) where
   filledRectangleC dims = FilledRectangle dims . colorToVector
   lineC dims = Line dims . colorToVector
 
+instance Semigroup (CompositingNode a) where
+  node1 <> node2 = node2 `overC` node1
+
 -- | 'mempty' represents no painting at all. Also
 --
 -- prop> mappend a b == overC a b
 instance Monoid (CompositingNode a) where
   mempty = NoOP
-  mappend = flip overC
 
 infixr 5 `overC`
 

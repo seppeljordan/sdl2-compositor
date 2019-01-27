@@ -41,7 +41,7 @@ class RelativeSize c where
   sizedR :: V2 Float -> a -> c a
 
 newtype ResIndependent c a = ResIndependent (V2 Int -> c a)
-                           deriving (Functor,Monoid)
+                           deriving (Functor,Monoid,Semigroup)
 
 instance Compositor (c a) => Compositor (ResIndependent c a) where
   overC (ResIndependent fun1) (ResIndependent fun2) =
